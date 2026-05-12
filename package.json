@@ -1,0 +1,20 @@
+{
+  "name": "generic-merchant-suite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Standalone GoKwik checkout suite that runs against any merchant storefront — URL/product/mobile/discount supplied at runtime.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "run-suite": "./run.sh",
+    "report": "playwright show-report report/html"
+  },
+  "dependencies": {
+    "@playwright/test": "^1.50.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.4.0"
+  }
+}
