@@ -152,6 +152,63 @@ export class NetworkEventCapture {
   ga4EventNames(): string[]  { return this.distinctNames(this.ga4Events()); }
   gadsConversionLabels(): string[] { return this.distinctNames(this.gadsEvents()); }
 
+  // --- ID-filtered helpers (BRD §9/§10/§11) -------------------------------
+  // GA4: `tid=<measurementId>` carries the destination property ID.
+  ga4EventsForId(measurementId: string): CapturedEvent[] {
+    const id = measurementId.trim();
+    if (!id) return [];
+    return this.ga4Events().filter((e) => this._paramHasValue(e, 'tid', id));
+  }
+  ga4EventNamesForId(measurementId: string): string[] {
+    return this.distinctNames(this.ga4EventsForId(measurementId));
+  }
+  hasGa4EventForId(name: string, measurementId: string): boolean {
+    const target = name.toLowerCase();
+    return this.ga4EventNamesForId(measurementId).some((n) => n.toLowerCase() === target);
+  }
+
+  // Meta: pixel ID is carried as `id=<pixelId>` on /tr requests.
+  metaEventsForPixel(pixelId: string): CapturedEvent[] {
+    const id = pixelId.trim();
+    if (!id) return [];
+    return this.metaEvents().filter((e) => this._paramHasValue(e, 'id', id));
+  }
+  metaEventNamesForPixel(pixelId: string): string[] {
+    return this.distinctNames(this.metaEventsForPixel(pixelId));
+  }
+  hasMetaEventForPixel(name: string, pixelId: string): boolean {
+    const target = name.toLowerCase();
+    return this.metaEventNamesForPixel(pixelId).some((n) => n.toLowerCase() === target);
+  }
+
+  // GAds: the Adwords ID appears in the URL path (e.g. /pagead/conversion/12345/).
+  gadsEventsForAwId(adwordsId: string): CapturedEvent[] {
+    const id = adwordsId.replace(/^AW-/i, '').trim();
+    if (!id) return [];
+    return this.gadsEvents().filter((e) =>
+      new RegExp(`(?:/|=)${id}(?:/|&|$|[^0-9])`, 'i').test(e.url)
+    );
+  }
+  gadsLabelsForAwId(adwordsId: string): string[] {
+    return this.distinctNames(this.gadsEventsForAwId(adwordsId));
+  }
+
+  // True iff at least one captured event contains key=value in URL or body.
+  private _paramHasValue(e: CapturedEvent, key: string, value: string): boolean {
+    const target = value.toLowerCase();
+    const combined = `${e.url}\n${e.postData || ''}`;
+    const re = new RegExp(`(?:^|[?&\\n\\r])${key}=([^&\\n\\r]+)`, 'gi');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(combined)) !== null) {
+      try {
+        if (decodeURIComponent(m[1]).toLowerCase() === target) return true;
+      } catch (_) {
+        if (m[1].toLowerCase() === target) return true;
+      }
+    }
+    return false;
+  }
+
   hasMetaEvent(name: string): boolean {
     const target = name.toLowerCase();
     return this.metaEventNames().some((n) => n.toLowerCase() === target);

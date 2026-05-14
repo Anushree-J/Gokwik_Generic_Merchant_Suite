@@ -113,7 +113,35 @@ export class GenericMerchantPage {
     return false;
   }
 
+  // Dismiss any newsletter / cart-drawer / age-gate / cookie-consent modal
+  // that might overlay the next interactive button. Generic across merchants:
+  // tries Escape first (closes most accessible dialogs), then explicit close
+  // affordances (× glyph, aria-label, "No thanks", etc.), then any dialog's
+  // close button as a last resort.
+  async dismissPopups(): Promise<void> {
+    // Pass 1: Escape — most accessible dialogs close on it.
+    try { await this.page.keyboard.press('Escape'); await this.page.waitForTimeout(300); } catch (_) {}
+
+    const closeCandidates: Locator[] = [
+      this.page.locator('button[aria-label="Close" i]').first(),
+      this.page.locator('[role="dialog"] button[aria-label*="close" i]').first(),
+      this.page.locator('[role="dialog"]').locator('button').filter({ hasText: /^(close|×|✕|x)$/i }).first(),
+      this.page.locator('xpath=//*[self::button or @role="button"][normalize-space(.)="×" or normalize-space(.)="✕" or normalize-space(.)="X"]').first(),
+      this.page.getByRole('button', { name: /^(no thanks|maybe later|dismiss|not now|skip|close)$/i }).first(),
+    ];
+    for (const c of closeCandidates) {
+      try {
+        if (await c.isVisible({ timeout: 1000 })) {
+          await c.click({ timeout: 2000 });
+          log('Dismissed a popup');
+          await this.page.waitForTimeout(500);
+        }
+      } catch (_) { /* ignore — popup may not exist */ }
+    }
+  }
+
   async clickAddToCart(): Promise<boolean> {
+    await this.dismissPopups();
     const candidates: Locator[] = [
       this.page.getByRole('button', { name: /add to (cart|bag)/i }).first(),
       this.page.locator('xpath=//*[self::button or self::a or self::input][contains(translate(normalize-space(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "add to cart")]').first(),
@@ -138,11 +166,14 @@ export class GenericMerchantPage {
   }
 
   async clickPayNowOrPlaceOrder(): Promise<boolean> {
+    await this.dismissPopups();
     const lc = (text: string) =>
       `xpath=//*[self::button or self::a or self::input][contains(translate(normalize-space(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"), "${text}")]`;
 
     const candidates: Locator[] = [
-      this.page.getByRole('button', { name: /pay now|place order|proceed to checkout|buy now|^checkout$/i }).first(),
+      this.page.getByRole('button', { name: /pay now|place order|proceed to checkout|buy now|^checkout$|pay via|cash on delivery/i }).first(),
+      this.page.locator(lc('pay via')).first(),
+      this.page.locator(lc('cash on delivery')).first(),
       this.page.locator(lc('pay now')).first(),
       this.page.locator(lc('place order')).first(),
       this.page.locator(lc('proceed to checkout')).first(),

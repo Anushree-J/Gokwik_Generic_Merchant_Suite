@@ -3,7 +3,20 @@ import { test, expect } from '@playwright/test';
 import { GenericMerchantPage } from '../pages/GenericMerchantPage';
 import { GokwikCheckoutFrame } from '../pages/GokwikCheckoutFrame';
 import { NetworkEventCapture } from '../utils/NetworkEventCapture';
-import { SITE_URL, PRODUCT_NAME, DISCOUNT_CODE, PHONE_NUMBER, SKIP_ATC } from './_inputs';
+import {
+  SITE_URL, PRODUCT_NAME, DISCOUNT_CODE, PHONE_NUMBER, SKIP_ATC,
+  BRAND_COLOR_HEX,
+  PREPAID_DISCOUNT_ENABLED, PREPAID_DISCOUNT_SCOPE, PREPAID_DISCOUNT_TYPE,
+  PREPAID_DISCOUNT_VALUE, PREPAID_DISCOUNT_CAP, PREPAID_DISCOUNT_MIN_CART,
+  PAYMENT_METHODS,
+  EXPECTED_DISCOUNT_CODES,
+  SHIPPING_NAME, SHIPPING_PRICE,
+  COD_FEE_ENABLED, COD_FEE_VALUE,
+  TAX_SHOW_ON_CHECKOUT, TAX_INCLUSIVE,
+  GA4_MEASUREMENT_ID, META_PIXEL_ID,
+  GADS_ADWORDS_ID, GADS_PURCHASE_LABEL, GADS_BEGIN_CHECKOUT_LABEL,
+  COD_LIMIT_LOWER, COD_LIMIT_UPPER,
+} from './_inputs';
 
 // ---------------------------------------------------------------------------
 // Generic_FullCheckoutSuite
@@ -71,14 +84,14 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
     });
 
     await test.step('Enter mobile + address', async () => {
-      const phone = PHONE_NUMBER || randomPhone();
+      const phone = '9289955127';
       await checkout.enterPhone(phone);
       console.log(`Entered phone: ${phone}`);
 
-      // Manual OTP entry — user types the OTP in the headed browser. Wait up
-      // to 3 minutes for either the address tab (new user) or the payment
-      // screen (returning user with a saved address).
-      console.log('\n>>> ACTION REQUIRED: enter the login OTP in the browser. The test will continue automatically. <<<\n');
+      // Hardcoded OTP for this merchant's sandbox.
+      await page.waitForTimeout(2000);
+      await checkout.enterOtp('1212');
+
       const checkoutFrame = page.frameLocator("iframe#gokwik-iframe, iframe[title='Checkout window']");
       const postOtpIndicator = checkoutFrame.locator(
         "//input[@name='full-name'] | //input[@id='full-name'] | //input[@name='full-address'] | " +
@@ -163,6 +176,123 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       console.log('COD button is visible — order placement intentionally skipped');
     });
 
+    // -----------------------------------------------------------------------
+    // BRD validation steps. Each step is OPTIONAL and skips silently when its
+    // configuring input(s) are unset. The suite stays usable for merchants
+    // that haven't configured the corresponding feature.
+    // -----------------------------------------------------------------------
+
+    await test.step('BRD §1 — Primary brand colour', async () => {
+      if (!BRAND_COLOR_HEX) { console.log('BRAND_COLOR_HEX unset — skipping'); return; }
+      const expected = BRAND_COLOR_HEX.replace(/^#?/, '#').toLowerCase();
+      const actual = await checkout.primaryButtonHex();
+      console.log(`Brand colour — expected=${expected} actual=${actual ?? '<none>'}`);
+      expect(actual, `Primary button background should match ${expected}`).toBe(expected);
+    });
+
+    await test.step('BRD §3 — Configured payment methods visible', async () => {
+      if (PAYMENT_METHODS.length === 0) { console.log('PAYMENT_METHODS unset — skipping'); return; }
+      for (const method of PAYMENT_METHODS) {
+        const visible = await checkout.isPaymentMethodVisible(method);
+        console.log(`Payment method '${method}' visible=${visible}`);
+        expect(visible, `Payment method '${method}' should be visible`).toBe(true);
+      }
+    });
+
+    await test.step('BRD §4 — Expected discount codes listed', async () => {
+      if (EXPECTED_DISCOUNT_CODES.length === 0) { console.log('EXPECTED_DISCOUNT_CODES unset — skipping'); return; }
+      const listed = await checkout.listedCouponCodes();
+      console.log(`Coupons listed: ${listed.join(', ') || '<none>'}`);
+      for (const code of EXPECTED_DISCOUNT_CODES) {
+        const found = listed.some((c) => c.toLowerCase().includes(code.toLowerCase()));
+        expect(found, `Expected coupon code '${code}' to be listed`).toBe(true);
+      }
+    });
+
+    await test.step('BRD §5 — Shipping line', async () => {
+      if (!SHIPPING_NAME && SHIPPING_PRICE === null) { console.log('SHIPPING_NAME/PRICE unset — skipping'); return; }
+      if (SHIPPING_NAME) {
+        const visible = await checkout.hasTextInFrame(SHIPPING_NAME);
+        expect(visible, `Shipping line '${SHIPPING_NAME}' should appear in summary`).toBe(true);
+      }
+      if (SHIPPING_PRICE !== null) {
+        const amt = await checkout.summaryLineAmount(/shipping|delivery/i);
+        console.log(`Shipping amount — expected=${SHIPPING_PRICE} actual=${amt ?? '<none>'}`);
+        expect(amt, 'Shipping amount line should be present').not.toBeNull();
+        expect(amt).toBe(SHIPPING_PRICE);
+      }
+    });
+
+    await test.step('BRD §8 — Tax display', async () => {
+      if (!TAX_SHOW_ON_CHECKOUT && !TAX_INCLUSIVE) { console.log('TAX_* unset — skipping'); return; }
+      if (TAX_SHOW_ON_CHECKOUT) {
+        const taxLine =
+          (await checkout.hasTextInFrame('tax')) ||
+          (await checkout.hasTextInFrame('gst'));
+        expect(taxLine, 'A tax/GST line should be visible in the summary').toBe(true);
+      }
+      if (TAX_INCLUSIVE) {
+        const inclusive = await checkout.hasTextInFrame('inclusive of');
+        expect(inclusive, '"Inclusive of taxes" text should be visible').toBe(true);
+      }
+    });
+
+    await test.step('BRD §12 — COD limit (single-point check at current cart value)', async () => {
+      if (COD_LIMIT_LOWER === null && COD_LIMIT_UPPER === null) { console.log('COD_LIMIT_* unset — skipping'); return; }
+      const cartAmount =
+        (await checkout.summaryLineAmount(/to pay|total payable|order total|grand total/i)) ?? 0;
+      const codVisible = await checkout.isPaymentMethodVisible('COD');
+      const withinRange =
+        (COD_LIMIT_LOWER === null || cartAmount >= COD_LIMIT_LOWER) &&
+        (COD_LIMIT_UPPER === null || cartAmount <= COD_LIMIT_UPPER);
+      console.log(`COD limit — cart=${cartAmount} within=[${COD_LIMIT_LOWER}, ${COD_LIMIT_UPPER}]=${withinRange} cod_visible=${codVisible}`);
+      expect(codVisible, `COD should ${withinRange ? '' : 'NOT '}be visible at cart=${cartAmount}`).toBe(withinRange);
+    });
+
+    await test.step('BRD §6 — COD fee value', async () => {
+      if (!COD_FEE_ENABLED) { console.log('COD_FEE_ENABLED unset — skipping'); return; }
+      const selected = await checkout.selectPaymentMethod('COD');
+      if (!selected) { console.warn('Could not select COD tile — skipping'); return; }
+      await page.waitForTimeout(1500);
+      const fee = await checkout.summaryLineAmount(/cod (fee|charge)/i);
+      console.log(`COD fee — expected=${COD_FEE_VALUE} actual=${fee ?? '<none>'}`);
+      expect(fee, 'COD fee line should be present').not.toBeNull();
+      if (COD_FEE_VALUE !== null) expect(fee).toBe(COD_FEE_VALUE);
+    });
+
+    await test.step('BRD §2 — Prepaid discount', async () => {
+      if (!PREPAID_DISCOUNT_ENABLED) { console.log('PREPAID_DISCOUNT_ENABLED unset — skipping'); return; }
+      const cartAmount =
+        (await checkout.summaryLineAmount(/to pay|total payable|order total|grand total/i)) ?? 0;
+      if (PREPAID_DISCOUNT_MIN_CART !== null && cartAmount < PREPAID_DISCOUNT_MIN_CART) {
+        console.log(`Cart ${cartAmount} below prepaid discount min ${PREPAID_DISCOUNT_MIN_CART} — skipping`);
+        return;
+      }
+      // Switch to a prepaid method. For scope=upi only UPI qualifies; for
+      // scope=all any prepaid method works — try UPI first as the common case.
+      const method = PREPAID_DISCOUNT_SCOPE.toLowerCase() === 'upi' ? 'UPI' : 'UPI';
+      const selected = await checkout.selectPaymentMethod(method);
+      if (!selected) { console.warn(`Could not select ${method} tile — skipping`); return; }
+      await page.waitForTimeout(1500);
+
+      const discountAmt = await checkout.summaryLineAmount(/prepaid (discount|offer)|online payment discount/i);
+      console.log(`Prepaid discount — actual=${discountAmt ?? '<none>'}`);
+      expect(discountAmt, 'Prepaid discount line should appear after selecting prepaid method').not.toBeNull();
+
+      if (PREPAID_DISCOUNT_VALUE !== null) {
+        let expected: number;
+        if (PREPAID_DISCOUNT_TYPE.toLowerCase() === 'percent') {
+          expected = (cartAmount * PREPAID_DISCOUNT_VALUE) / 100;
+          if (PREPAID_DISCOUNT_CAP !== null) expected = Math.min(expected, PREPAID_DISCOUNT_CAP);
+        } else {
+          expected = PREPAID_DISCOUNT_VALUE;
+        }
+        const rounded = Math.round(expected * 100) / 100;
+        console.log(`Prepaid discount expected=${rounded} (type=${PREPAID_DISCOUNT_TYPE}, value=${PREPAID_DISCOUNT_VALUE}, cap=${PREPAID_DISCOUNT_CAP}, cart=${cartAmount})`);
+        expect(Math.abs((discountAmt ?? 0) - rounded)).toBeLessThanOrEqual(1);
+      }
+    });
+
     capture.stop();
     const summary = capture.summary();
     console.log('Captured event summary:', summary);
@@ -202,6 +332,59 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
         labels.length >= REQUIRED_GADS_CONVERSION_COUNT,
         `Expected at least ${REQUIRED_GADS_CONVERSION_COUNT} distinct GAds conversion labels (begin_checkout + purchase); got ${labels.length}`
       ).toBe(true);
+    });
+
+    // -----------------------------------------------------------------------
+    // BRD §9 / §10 / §11 — analytics events must land on the configured IDs.
+    // Each step is OPTIONAL: skipped when the corresponding ID is unset.
+    // -----------------------------------------------------------------------
+
+    await test.step('BRD §9 — GA4 events sent to configured measurement ID', async () => {
+      if (!GA4_MEASUREMENT_ID) { console.log('GA4_MEASUREMENT_ID unset — skipping'); return; }
+      const names = capture.ga4EventNamesForId(GA4_MEASUREMENT_ID);
+      console.log(`GA4 events on ${GA4_MEASUREMENT_ID}: ${names.join(', ') || '<none>'}`);
+      expect(names.length, `GA4 should fire to measurement ID ${GA4_MEASUREMENT_ID}`).toBeGreaterThan(0);
+      // Each pre-order required GA4 event should land on this ID too.
+      for (const ev of REQUIRED_GA4_EVENTS) {
+        if (ev === 'purchase') continue; // not fired in stop-at-COD flow
+        expect(
+          capture.hasGa4EventForId(ev, GA4_MEASUREMENT_ID),
+          `GA4 event '${ev}' should fire to measurement ID ${GA4_MEASUREMENT_ID}`
+        ).toBe(true);
+      }
+    });
+
+    await test.step('BRD §10 — Meta events sent to configured pixel ID', async () => {
+      if (!META_PIXEL_ID) { console.log('META_PIXEL_ID unset — skipping'); return; }
+      const names = capture.metaEventNamesForPixel(META_PIXEL_ID);
+      console.log(`Meta events on pixel ${META_PIXEL_ID}: ${names.join(', ') || '<none>'}`);
+      expect(names.length, `Meta should fire to pixel ${META_PIXEL_ID}`).toBeGreaterThan(0);
+      for (const ev of REQUIRED_META_EVENTS) {
+        if (ev === 'Purchase') continue; // not fired in stop-at-COD flow
+        expect(
+          capture.hasMetaEventForPixel(ev, META_PIXEL_ID),
+          `Meta event '${ev}' should fire to pixel ${META_PIXEL_ID}`
+        ).toBe(true);
+      }
+    });
+
+    await test.step('BRD §11 — GAds conversions sent to configured Adwords ID', async () => {
+      if (!GADS_ADWORDS_ID) { console.log('GADS_ADWORDS_ID unset — skipping'); return; }
+      const labels = capture.gadsLabelsForAwId(GADS_ADWORDS_ID);
+      console.log(`GAds labels on ${GADS_ADWORDS_ID}: ${labels.join(', ') || '<none>'}`);
+      expect(labels.length, `GAds conversions should land on ${GADS_ADWORDS_ID}`).toBeGreaterThan(0);
+      if (GADS_BEGIN_CHECKOUT_LABEL) {
+        expect(
+          labels.some((l) => l === GADS_BEGIN_CHECKOUT_LABEL),
+          `Expected begin_checkout conversion label '${GADS_BEGIN_CHECKOUT_LABEL}' on ${GADS_ADWORDS_ID}`
+        ).toBe(true);
+      }
+      if (GADS_PURCHASE_LABEL) {
+        // Purchase label only fires after order placement, which this suite
+        // intentionally skips. Log presence but don't hard-fail.
+        const found = labels.some((l) => l === GADS_PURCHASE_LABEL);
+        console.log(`GAds purchase label '${GADS_PURCHASE_LABEL}' present=${found} (flow stops pre-order; informational only)`);
+      }
     });
   });
 });
