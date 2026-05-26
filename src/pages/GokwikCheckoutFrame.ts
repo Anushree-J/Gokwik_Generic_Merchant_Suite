@@ -12,7 +12,7 @@ import { Page, FrameLocator } from '@playwright/test';
 const log = (msg: string) => console.log(`[GokwikCheckoutFrame] ${msg}`);
 
 const IFRAME_SELECTOR =
-  "iframe#gokwik-iframe, iframe[title='Checkout window'], iframe[src*='gokwik']";
+  "iframe#gokwik-iframe, iframe[title='Checkout window']";
 
 export class GokwikCheckoutFrame {
   readonly page: Page;
@@ -26,15 +26,18 @@ export class GokwikCheckoutFrame {
 
   async verifyPresentOfIFrame(): Promise<boolean> {
     try {
-      await this.page.locator(IFRAME_SELECTOR).waitFor({ state: 'visible', timeout: 45_000 });
+      // .first() — the wider selector can match multiple iframes (e.g. a
+      // GoKwik analytics iframe alongside the checkout one); strict-mode
+      // would fail before the checkout iframe even attaches.
+      await this.page.locator(IFRAME_SELECTOR).first().waitFor({ state: 'visible', timeout: 45_000 });
       return true;
     } catch { return false; }
   }
 
   async switchToChekoutFrame(): Promise<boolean> {
     try {
-      await this.page.locator(IFRAME_SELECTOR).waitFor({ state: 'visible', timeout: 45_000 });
-      this.frame = this.page.frameLocator(IFRAME_SELECTOR);
+      await this.page.locator(IFRAME_SELECTOR).first().waitFor({ state: 'visible', timeout: 45_000 });
+      this.frame = this.page.frameLocator(IFRAME_SELECTOR).first();
       log('Switched to checkout iframe');
       return true;
     } catch (e) {
@@ -113,27 +116,35 @@ export class GokwikCheckoutFrame {
         return true;
       } catch (_) { /* fall through to popup container fallback */ }
 
-      // Fallback: some merchants render the OTP step in a popup container.
-      // Look for input(s) inside the known popup XPath and fill them.
-      const popupInputs = this.frame.locator(
-        "xpath=/html/body/div/div/div[4]/div/div[2]/div/div//input"
-      );
-      const popupCount = await popupInputs.count().catch(() => 0);
-      if (popupCount >= digits.length) {
-        for (let i = 0; i < digits.length; i++) {
-          const box = popupInputs.nth(i);
-          await box.waitFor({ state: 'visible', timeout: 5_000 });
-          await box.fill(digits[i]);
+      // Fallback: some merchants render the OTP step in a bottom-sheet /
+      // modal container. Look for input(s) inside any of the common GoKwik
+      // popup wrappers and fill them.
+      const popupContainers = [
+        "//div[contains(@class,'bottom-sheet-container')]",
+        "//div[contains(@class,'otp-modal')]",
+        "//div[contains(@class,'otp-popup')]",
+        "//*[@role='dialog']",
+      ];
+      for (const container of popupContainers) {
+        const popupInputs = this.frame.locator(`xpath=${container}//input[@type='tel' or @inputmode='numeric' or @type='number' or @type='text']`);
+        const popupCount = await popupInputs.count().catch(() => 0);
+        if (popupCount === 0) continue;
+        if (popupCount >= digits.length) {
+          for (let i = 0; i < digits.length; i++) {
+            const box = popupInputs.nth(i);
+            await box.waitFor({ state: 'visible', timeout: 5_000 });
+            await box.fill(digits[i]);
+          }
+          log(`Entered OTP across ${digits.length} boxes in ${container}: ${otp}`);
+          return true;
         }
-        log(`Entered OTP in popup container across ${digits.length} boxes: ${otp}`);
-        return true;
-      }
-      if (popupCount === 1) {
-        const box = popupInputs.first();
-        await box.waitFor({ state: 'visible', timeout: 5_000 });
-        await box.fill(otp);
-        log(`Entered OTP in popup container single input: ${otp}`);
-        return true;
+        if (popupCount === 1) {
+          const box = popupInputs.first();
+          await box.waitFor({ state: 'visible', timeout: 5_000 });
+          await box.fill(otp);
+          log(`Entered OTP in single input in ${container}: ${otp}`);
+          return true;
+        }
       }
       throw new Error('No OTP input found (multi-box, single, or popup container)');
     } catch (e) {
@@ -229,11 +240,13 @@ export class GokwikCheckoutFrame {
   }
 
   async enterDiscountUpdated(code: string): Promise<void> {
-    await this.page.waitForTimeout(2_000);
+    await this.page.waitForTimeout(1_000);
+    // Prefer the direct discount box visible on the summary — placeholder-
+    // based. Falls back to the drawer-only inputs for older GoKwik layouts.
     const input = this.frame.locator(
-      "//div[contains(@class,'container bottom')]//div[contains(@class,'discount-box')]//input | " +
+      "//input[contains(translate(@placeholder,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'coupon') or contains(translate(@placeholder,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'discount')] | " +
       "//div[contains(@class,'discount-coupon')]//input | " +
-      "//input[contains(@placeholder,'coupon') or contains(@placeholder,'Coupon')]"
+      "//div[contains(@class,'discount-box')]//input"
     ).first();
     await input.waitFor({ state: 'visible', timeout: 10_000 });
     await input.fill(code);

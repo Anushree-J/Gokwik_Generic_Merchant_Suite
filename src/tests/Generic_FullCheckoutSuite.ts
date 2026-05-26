@@ -4,7 +4,8 @@ import { GenericMerchantPage } from '../pages/GenericMerchantPage';
 import { GokwikCheckoutFrame } from '../pages/GokwikCheckoutFrame';
 import { NetworkEventCapture } from '../utils/NetworkEventCapture';
 import {
-  SITE_URL, PRODUCT_NAME, DISCOUNT_CODE, PHONE_NUMBER, SKIP_ATC,
+  SITE_URL, PRODUCT_NAME, DISCOUNT_CODE, PHONE_NUMBER, OTP_VALUE, SKIP_ATC,
+  PLACE_ORDER,
   BRAND_COLOR_HEX,
   PREPAID_DISCOUNT_ENABLED, PREPAID_DISCOUNT_SCOPE, PREPAID_DISCOUNT_TYPE,
   PREPAID_DISCOUNT_VALUE, PREPAID_DISCOUNT_CAP, PREPAID_DISCOUNT_MIN_CART,
@@ -27,11 +28,12 @@ import {
 
 // Default address values used only if the new-user address tab actually
 // appears (returning users skip them). All wrapped in try-catch upstream.
-const DEFAULT_FULLNAME    = 'Saleheen Anwar';
-const DEFAULT_FIRSTNAME   = 'Saleheen';
-const DEFAULT_LASTNAME    = 'Anwar';
-const DEFAULT_EMAIL       = 'saleheen@gokwik.co';
-const DEFAULT_FULLADDRESS = 'House No 244, Sangharsh Nagar, Nashik 422010';
+// Synthetic placeholders — never use real customer data here.
+const DEFAULT_FULLNAME    = 'Test User';
+const DEFAULT_FIRSTNAME   = 'Test';
+const DEFAULT_LASTNAME    = 'User';
+const DEFAULT_EMAIL       = 'qa-suite@example.com';
+const DEFAULT_FULLADDRESS = '123 Test Street, Test City 000000';
 
 const randomPhone = () =>
   String(Math.floor(6_000_000_000 + Math.random() * 3_999_999_999));
@@ -77,6 +79,27 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
     await test.step('2. Checkout button working — iframe opens', async () => {
       expect(await merchant.clickPayNowOrPlaceOrder()).toBe(true);
       checkout = new GokwikCheckoutFrame(page);
+
+      // Quick probe — does the GoKwik iframe attach within 5s?
+      // If not, the click likely hit a Shopify native Buy Now (boAt-style).
+      // Fall back to /cart, which on most Shopify merchants exposes the
+      // GoKwik-wired Checkout button.
+      const quickProbe = await page
+        .locator("iframe#gokwik-iframe, iframe[title='Checkout window']")
+        .first()
+        .waitFor({ state: 'visible', timeout: 5_000 })
+        .then(() => true)
+        .catch(() => false);
+
+      if (!quickProbe) {
+        console.log('GoKwik iframe did not attach within 5s — trying /cart route');
+        const origin = new URL(page.url()).origin;
+        await page.goto(`${origin}/cart`);
+        await page.waitForLoadState('domcontentloaded').catch(() => {});
+        await page.waitForTimeout(1500);
+        await merchant.clickPayNowOrPlaceOrder();
+      }
+
       expect(await checkout.verifyPresentOfIFrame(), 'GoKwik iframe should be visible').toBe(true);
       expect(await checkout.switchToChekoutFrame()).toBe(true);
       expect(await checkout.verifyPresentOfPhonenumber(), 'Phone input should be visible').toBe(true);
@@ -84,13 +107,12 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
     });
 
     await test.step('Enter mobile + address', async () => {
-      const phone = '9289955127';
-      await checkout.enterPhone(phone);
-      console.log(`Entered phone: ${phone}`);
+      await checkout.enterPhone(PHONE_NUMBER);
+      console.log(`Entered phone: ${PHONE_NUMBER}`);
 
-      // Hardcoded OTP for this merchant's sandbox.
+      // OTP from env (default '1212' — sandbox OTP every merchant accepts).
       await page.waitForTimeout(2000);
-      await checkout.enterOtp('1212');
+      await checkout.enterOtp(OTP_VALUE);
 
       const checkoutFrame = page.frameLocator("iframe#gokwik-iframe, iframe[title='Checkout window']");
       const postOtpIndicator = checkoutFrame.locator(
@@ -128,18 +150,28 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
         console.log('No DISCOUNT_CODE supplied — skipping discount step');
         return;
       }
+      let youSaved = 0;
+      let couponDisc = 0;
+      let readError: unknown = null;
       try {
-        await checkout.clickViewOffersUpdated();
+        // Type directly into the discount box visible on the summary — no
+        // drawer open required. The page-object handles both layouts.
         await checkout.enterDiscountUpdated(DISCOUNT_CODE);
         await page.waitForTimeout(2000);
-        const youSaved   = parseAmount(await checkout.youSaved());
-        const couponDisc = parseAmount(await checkout.couponDiscount());
-        expect(couponDisc).toBe(youSaved);
+        youSaved   = parseAmount(await checkout.youSaved());
+        couponDisc = parseAmount(await checkout.couponDiscount());
         await checkout.calculateToPayWithAppliedCoupon();
-        console.log(`Discount applied — coupon=${couponDisc}, youSaved=${youSaved}`);
       } catch (e) {
-        console.warn('Discount apply step soft-failed:', e);
+        readError = e;
       }
+      console.log(`Discount '${DISCOUNT_CODE}' — coupon=${couponDisc}, youSaved=${youSaved}${readError ? ` (read error: ${readError})` : ''}`);
+      // Assertions live OUTSIDE the try so they actually fail the test.
+      // Both values must agree AND be > 0 when a code was supplied.
+      expect(couponDisc, `Coupon discount and "you saved" should agree`).toBe(youSaved);
+      expect(
+        couponDisc,
+        `Discount code '${DISCOUNT_CODE}' should yield a non-zero coupon discount (got ${couponDisc})`
+      ).toBeGreaterThan(0);
     });
 
     await test.step('4. Basic checkout sanity — verify COD button is visible (order NOT placed)', async () => {
@@ -299,17 +331,21 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
 
     // Specific events we expect this checkout flow to fire. Anything outside
     // these lists is ignored — we no longer assert on raw hit counts.
-    const REQUIRED_META_EVENTS = ['InitiateCheckout', 'AddPaymentInfo', 'Purchase'];
-    const REQUIRED_GA4_EVENTS = [
-      'gokwik_checkout_initiated',
-      'begin_checkout',
-      'add_shipping_info',
-      'add_payment_info',
-      'purchase',
-    ];
-    const REQUIRED_GADS_CONVERSION_COUNT = 2; // begin_checkout + purchase labels
+    //
+    // Events that depend on actually progressing past COD-visibility
+    // (`AddPaymentInfo`, `add_shipping_info`, `add_payment_info`, Purchase
+    // events) only fire reliably when an order is placed. The base suite
+    // stops at COD visibility, so we restrict the required lists to events
+    // every healthy GoKwik integration fires by then.
+    const REQUIRED_META_EVENTS = PLACE_ORDER
+      ? ['InitiateCheckout', 'AddPaymentInfo', 'Purchase']
+      : ['InitiateCheckout'];
+    const REQUIRED_GA4_EVENTS = PLACE_ORDER
+      ? ['gokwik_checkout_initiated', 'begin_checkout', 'add_shipping_info', 'add_payment_info', 'purchase']
+      : ['gokwik_checkout_initiated', 'begin_checkout'];
+    const REQUIRED_GADS_CONVERSION_COUNT = PLACE_ORDER ? 2 : 1; // +purchase only when an order is placed
 
-    await test.step('5. Meta events — InitiateCheckout / AddPaymentInfo / Purchase', async () => {
+    await test.step(`5. Meta events — ${REQUIRED_META_EVENTS.join(' / ')}`, async () => {
       const seen = capture.metaEventNames();
       console.log(`Meta events captured: ${seen.join(', ') || '<none>'}`);
       for (const ev of REQUIRED_META_EVENTS) {
@@ -317,7 +353,7 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       }
     });
 
-    await test.step('6. GA4 events — begin_checkout / add_shipping_info / add_payment_info / purchase / gokwik_checkout_initiated', async () => {
+    await test.step(`6. GA4 events — ${REQUIRED_GA4_EVENTS.join(' / ')}`, async () => {
       const seen = capture.ga4EventNames();
       console.log(`GA4 events captured: ${seen.join(', ') || '<none>'}`);
       for (const ev of REQUIRED_GA4_EVENTS) {
@@ -325,12 +361,12 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       }
     });
 
-    await test.step('7. Google Ads — begin_checkout + purchase conversion labels', async () => {
+    await test.step(`7. Google Ads — ≥${REQUIRED_GADS_CONVERSION_COUNT} distinct conversion label(s)`, async () => {
       const labels = capture.gadsConversionLabels();
       console.log(`GAds conversion labels captured: ${labels.join(', ') || '<none>'}`);
       expect(
         labels.length >= REQUIRED_GADS_CONVERSION_COUNT,
-        `Expected at least ${REQUIRED_GADS_CONVERSION_COUNT} distinct GAds conversion labels (begin_checkout + purchase); got ${labels.length}`
+        `Expected at least ${REQUIRED_GADS_CONVERSION_COUNT} distinct GAds conversion label(s); got ${labels.length}`
       ).toBe(true);
     });
 

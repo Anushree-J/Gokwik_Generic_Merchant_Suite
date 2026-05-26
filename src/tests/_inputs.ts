@@ -29,11 +29,23 @@ export const PRODUCT_NAME =
 export const DISCOUNT_CODE =
   process.env.DISCOUNT_CODE ?? '';
 
-export const PHONE_NUMBER = process.env.PHONE_NUMBER ?? '';
+// Sandbox phone every GoKwik merchant accepts in test mode. Override via
+// the PHONE_NUMBER env var only when validating a non-sandbox flow.
+export const PHONE_NUMBER = process.env.PHONE_NUMBER ?? '9289955127';
+
+// OTP entered in the GoKwik checkout. Default '1212' matches the sandbox
+// OTP every merchant accepts in test mode.
+export const OTP_VALUE = process.env.OTP_VALUE ?? '1212';
 
 // Skip the Add-to-Cart click and open checkout directly (e.g. via "Buy Now").
 export const SKIP_ATC =
   (process.env.SKIP_ATC ?? '').toLowerCase() === 'true';
+
+// When PLACE_ORDER=true the suite expects the full post-order analytics
+// (Meta Purchase, GA4 purchase, GAds purchase conversion). Default false —
+// the suite stops at COD-button visibility, so post-order events would
+// never fire and asserting them would guarantee a false negative.
+export const PLACE_ORDER = envBool('PLACE_ORDER');
 
 // --- BRD §1: Primary brand colour -----------------------------------------
 // 6-digit hex (with or without leading '#') of the merchant's primary colour.

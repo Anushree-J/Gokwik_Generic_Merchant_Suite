@@ -45,9 +45,11 @@ All inputs are env vars (set by `run.sh` or directly). Defaults are listed where
 |---|---|
 | `SITE_URL` | Merchant storefront URL (homepage or PDP) |
 | `PRODUCT_NAME` | Product to search/click |
-| `PHONE_NUMBER` | Mobile number for OTP login |
-| `DISCOUNT_CODE` | (optional) Coupon code to apply at checkout |
+| `PHONE_NUMBER` | Mobile number for OTP login. Falls back to a random 10-digit number if unset. |
+| `OTP_VALUE` | (optional, default `1212`) Sandbox OTP that every merchant accepts in test mode. |
+| `DISCOUNT_CODE` | (optional) Coupon code to apply at checkout. When set, the test asserts the applied coupon discount is non-zero. |
 | `SKIP_ATC` | `true` to skip Add-to-Cart and click Buy Now directly |
+| `PLACE_ORDER` | (optional, default `false`) When `true`, the suite expects post-order analytics (Meta `Purchase`, GA4 `purchase`, the 2nd GAds conversion label). Leave unset for the stop-at-COD flow. |
 
 ### BRD §1 — Primary brand colour
 
@@ -184,7 +186,6 @@ Per-merchant exact-match locators are an anti-pattern in this repo.
 
 ## Known limitations
 
-- The base test currently asserts Meta `Purchase` and GA4 `purchase` events — these never fire in the stop-at-COD flow, so the base test ends red even on healthy merchants. The BRD §9-11 steps already exclude `purchase` from their per-ID checks.
 - Product matching depends on the merchant's homepage / search UX. If `PRODUCT_NAME` doesn't appear on the homepage, search falls back to common Shopify search patterns — but on bespoke storefronts (e.g. Magento), pass a direct PDP URL as `SITE_URL`.
 - COD-limit validation (BRD §12) is a single-point check at the current cart value, not a sweep across multiple cart sizes.
 - BRD §7 (pincode serviceability) is not implemented.

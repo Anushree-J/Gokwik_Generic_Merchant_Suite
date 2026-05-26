@@ -84,17 +84,19 @@ echo "-- Core flow --------------------------------------------------"
 
 read -r -p "Enter site URL: "                                    INPUT_URL
 read -r -p "Enter product name: "                                INPUT_PRODUCT
-read -r -p "Enter mobile number: "                               INPUT_PHONE
 read -r -p "Enter discount code (Enter to skip): "               INPUT_DISCOUNT
 read -r -p "Skip Add-to-Cart, click Buy Now directly? (y/N): "   INPUT_SKIP_ATC
 
 if [ -z "$INPUT_URL" ];     then echo "ERROR: site URL is required" >&2;       exit 1; fi
 if [ -z "$INPUT_PRODUCT" ]; then echo "ERROR: product name is required" >&2;   exit 1; fi
-if [ -z "$INPUT_PHONE" ];   then echo "ERROR: mobile number is required" >&2;  exit 1; fi
 
+# Phone + OTP are auto-filled — no prompt. The sandbox phone 9289955127 with
+# OTP 1212 is the standard GoKwik test pair every merchant accepts in QA mode.
+# Override per-run by exporting PHONE_NUMBER / OTP_VALUE before invoking.
 export SITE_URL="$INPUT_URL"
 export PRODUCT_NAME="$INPUT_PRODUCT"
-export PHONE_NUMBER="$INPUT_PHONE"
+export PHONE_NUMBER="${PHONE_NUMBER:-9289955127}"
+export OTP_VALUE="${OTP_VALUE:-1212}"
 [ -n "$INPUT_DISCOUNT" ] && export DISCOUNT_CODE="$INPUT_DISCOUNT"
 [[ "$INPUT_SKIP_ATC" =~ ^[Yy] ]] && export SKIP_ATC="true"
 
@@ -160,7 +162,8 @@ echo "Running in $([ "$RUN_MODE" = "1" ] && echo BRD || echo Direct) mode."
 echo "Running with:"
 echo "  SITE_URL                 = $SITE_URL"
 echo "  PRODUCT_NAME             = $PRODUCT_NAME"
-echo "  PHONE_NUMBER             = $PHONE_NUMBER"
+echo "  PHONE_NUMBER             = $PHONE_NUMBER  (auto)"
+echo "  OTP_VALUE                = $OTP_VALUE  (auto)"
 echo "  DISCOUNT_CODE            = ${DISCOUNT_CODE:-<unset>}"
 echo "  SKIP_ATC                 = ${SKIP_ATC:-false}"
 echo "  BRAND_COLOR_HEX          = ${BRAND_COLOR_HEX:-<skip>}"
