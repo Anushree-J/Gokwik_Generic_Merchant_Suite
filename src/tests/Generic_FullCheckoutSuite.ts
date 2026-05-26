@@ -219,7 +219,7 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       const expected = BRAND_COLOR_HEX.replace(/^#?/, '#').toLowerCase();
       const actual = await checkout.primaryButtonHex();
       console.log(`Brand colour — expected=${expected} actual=${actual ?? '<none>'}`);
-      expect(actual, `Primary button background should match ${expected}`).toBe(expected);
+      expect.soft(actual, `Primary button background should match ${expected}`).toBe(expected);
     });
 
     await test.step('BRD §3 — Configured payment methods visible', async () => {
@@ -227,7 +227,7 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       for (const method of PAYMENT_METHODS) {
         const visible = await checkout.isPaymentMethodVisible(method);
         console.log(`Payment method '${method}' visible=${visible}`);
-        expect(visible, `Payment method '${method}' should be visible`).toBe(true);
+        expect.soft(visible, `Payment method '${method}' should be visible`).toBe(true);
       }
     });
 
@@ -237,7 +237,7 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       console.log(`Coupons listed: ${listed.join(', ') || '<none>'}`);
       for (const code of EXPECTED_DISCOUNT_CODES) {
         const found = listed.some((c) => c.toLowerCase().includes(code.toLowerCase()));
-        expect(found, `Expected coupon code '${code}' to be listed`).toBe(true);
+        expect.soft(found, `Expected coupon code '${code}' to be listed`).toBe(true);
       }
     });
 
@@ -245,13 +245,13 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       if (!SHIPPING_NAME && SHIPPING_PRICE === null) { console.log('SHIPPING_NAME/PRICE unset — skipping'); return; }
       if (SHIPPING_NAME) {
         const visible = await checkout.hasTextInFrame(SHIPPING_NAME);
-        expect(visible, `Shipping line '${SHIPPING_NAME}' should appear in summary`).toBe(true);
+        expect.soft(visible, `Shipping line '${SHIPPING_NAME}' should appear in summary`).toBe(true);
       }
       if (SHIPPING_PRICE !== null) {
         const amt = await checkout.summaryLineAmount(/shipping|delivery/i);
         console.log(`Shipping amount — expected=${SHIPPING_PRICE} actual=${amt ?? '<none>'}`);
-        expect(amt, 'Shipping amount line should be present').not.toBeNull();
-        expect(amt).toBe(SHIPPING_PRICE);
+        expect.soft(amt, 'Shipping amount line should be present').not.toBeNull();
+        expect.soft(amt).toBe(SHIPPING_PRICE);
       }
     });
 
@@ -261,11 +261,11 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
         const taxLine =
           (await checkout.hasTextInFrame('tax')) ||
           (await checkout.hasTextInFrame('gst'));
-        expect(taxLine, 'A tax/GST line should be visible in the summary').toBe(true);
+        expect.soft(taxLine, 'A tax/GST line should be visible in the summary').toBe(true);
       }
       if (TAX_INCLUSIVE) {
         const inclusive = await checkout.hasTextInFrame('inclusive of');
-        expect(inclusive, '"Inclusive of taxes" text should be visible').toBe(true);
+        expect.soft(inclusive, '"Inclusive of taxes" text should be visible').toBe(true);
       }
     });
 
@@ -278,7 +278,7 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
         (COD_LIMIT_LOWER === null || cartAmount >= COD_LIMIT_LOWER) &&
         (COD_LIMIT_UPPER === null || cartAmount <= COD_LIMIT_UPPER);
       console.log(`COD limit — cart=${cartAmount} within=[${COD_LIMIT_LOWER}, ${COD_LIMIT_UPPER}]=${withinRange} cod_visible=${codVisible}`);
-      expect(codVisible, `COD should ${withinRange ? '' : 'NOT '}be visible at cart=${cartAmount}`).toBe(withinRange);
+      expect.soft(codVisible, `COD should ${withinRange ? '' : 'NOT '}be visible at cart=${cartAmount}`).toBe(withinRange);
     });
 
     await test.step('BRD §6 — COD fee value', async () => {
@@ -288,8 +288,8 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       await page.waitForTimeout(1500);
       const fee = await checkout.summaryLineAmount(/cod (fee|charge)/i);
       console.log(`COD fee — expected=${COD_FEE_VALUE} actual=${fee ?? '<none>'}`);
-      expect(fee, 'COD fee line should be present').not.toBeNull();
-      if (COD_FEE_VALUE !== null) expect(fee).toBe(COD_FEE_VALUE);
+      expect.soft(fee, 'COD fee line should be present').not.toBeNull();
+      if (COD_FEE_VALUE !== null) expect.soft(fee).toBe(COD_FEE_VALUE);
     });
 
     await test.step('BRD §2 — Prepaid discount', async () => {
@@ -309,7 +309,7 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
 
       const discountAmt = await checkout.summaryLineAmount(/prepaid (discount|offer)|online payment discount/i);
       console.log(`Prepaid discount — actual=${discountAmt ?? '<none>'}`);
-      expect(discountAmt, 'Prepaid discount line should appear after selecting prepaid method').not.toBeNull();
+      expect.soft(discountAmt, 'Prepaid discount line should appear after selecting prepaid method').not.toBeNull();
 
       if (PREPAID_DISCOUNT_VALUE !== null) {
         let expected: number;
@@ -321,7 +321,7 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
         }
         const rounded = Math.round(expected * 100) / 100;
         console.log(`Prepaid discount expected=${rounded} (type=${PREPAID_DISCOUNT_TYPE}, value=${PREPAID_DISCOUNT_VALUE}, cap=${PREPAID_DISCOUNT_CAP}, cart=${cartAmount})`);
-        expect(Math.abs((discountAmt ?? 0) - rounded)).toBeLessThanOrEqual(1);
+        expect.soft(Math.abs((discountAmt ?? 0) - rounded)).toBeLessThanOrEqual(1);
       }
     });
 
@@ -349,7 +349,7 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       const seen = capture.metaEventNames();
       console.log(`Meta events captured: ${seen.join(', ') || '<none>'}`);
       for (const ev of REQUIRED_META_EVENTS) {
-        expect(capture.hasMetaEvent(ev), `Expected Meta event '${ev}' to fire`).toBe(true);
+        expect.soft(capture.hasMetaEvent(ev), `Expected Meta event '${ev}' to fire`).toBe(true);
       }
     });
 
@@ -357,14 +357,14 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       const seen = capture.ga4EventNames();
       console.log(`GA4 events captured: ${seen.join(', ') || '<none>'}`);
       for (const ev of REQUIRED_GA4_EVENTS) {
-        expect(capture.hasGa4Event(ev), `Expected GA4 event '${ev}' to fire`).toBe(true);
+        expect.soft(capture.hasGa4Event(ev), `Expected GA4 event '${ev}' to fire`).toBe(true);
       }
     });
 
     await test.step(`7. Google Ads — ≥${REQUIRED_GADS_CONVERSION_COUNT} distinct conversion label(s)`, async () => {
       const labels = capture.gadsConversionLabels();
       console.log(`GAds conversion labels captured: ${labels.join(', ') || '<none>'}`);
-      expect(
+      expect.soft(
         labels.length >= REQUIRED_GADS_CONVERSION_COUNT,
         `Expected at least ${REQUIRED_GADS_CONVERSION_COUNT} distinct GAds conversion label(s); got ${labels.length}`
       ).toBe(true);
@@ -379,11 +379,11 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       if (!GA4_MEASUREMENT_ID) { console.log('GA4_MEASUREMENT_ID unset — skipping'); return; }
       const names = capture.ga4EventNamesForId(GA4_MEASUREMENT_ID);
       console.log(`GA4 events on ${GA4_MEASUREMENT_ID}: ${names.join(', ') || '<none>'}`);
-      expect(names.length, `GA4 should fire to measurement ID ${GA4_MEASUREMENT_ID}`).toBeGreaterThan(0);
+      expect.soft(names.length, `GA4 should fire to measurement ID ${GA4_MEASUREMENT_ID}`).toBeGreaterThan(0);
       // Each pre-order required GA4 event should land on this ID too.
       for (const ev of REQUIRED_GA4_EVENTS) {
         if (ev === 'purchase') continue; // not fired in stop-at-COD flow
-        expect(
+        expect.soft(
           capture.hasGa4EventForId(ev, GA4_MEASUREMENT_ID),
           `GA4 event '${ev}' should fire to measurement ID ${GA4_MEASUREMENT_ID}`
         ).toBe(true);
@@ -394,10 +394,10 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       if (!META_PIXEL_ID) { console.log('META_PIXEL_ID unset — skipping'); return; }
       const names = capture.metaEventNamesForPixel(META_PIXEL_ID);
       console.log(`Meta events on pixel ${META_PIXEL_ID}: ${names.join(', ') || '<none>'}`);
-      expect(names.length, `Meta should fire to pixel ${META_PIXEL_ID}`).toBeGreaterThan(0);
+      expect.soft(names.length, `Meta should fire to pixel ${META_PIXEL_ID}`).toBeGreaterThan(0);
       for (const ev of REQUIRED_META_EVENTS) {
         if (ev === 'Purchase') continue; // not fired in stop-at-COD flow
-        expect(
+        expect.soft(
           capture.hasMetaEventForPixel(ev, META_PIXEL_ID),
           `Meta event '${ev}' should fire to pixel ${META_PIXEL_ID}`
         ).toBe(true);
@@ -408,9 +408,9 @@ test.describe('GenericMerchant — Full Checkout Suite', () => {
       if (!GADS_ADWORDS_ID) { console.log('GADS_ADWORDS_ID unset — skipping'); return; }
       const labels = capture.gadsLabelsForAwId(GADS_ADWORDS_ID);
       console.log(`GAds labels on ${GADS_ADWORDS_ID}: ${labels.join(', ') || '<none>'}`);
-      expect(labels.length, `GAds conversions should land on ${GADS_ADWORDS_ID}`).toBeGreaterThan(0);
+      expect.soft(labels.length, `GAds conversions should land on ${GADS_ADWORDS_ID}`).toBeGreaterThan(0);
       if (GADS_BEGIN_CHECKOUT_LABEL) {
-        expect(
+        expect.soft(
           labels.some((l) => l === GADS_BEGIN_CHECKOUT_LABEL),
           `Expected begin_checkout conversion label '${GADS_BEGIN_CHECKOUT_LABEL}' on ${GADS_ADWORDS_ID}`
         ).toBe(true);
